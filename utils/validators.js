@@ -20,8 +20,23 @@ function truncateMessage(text, maxLength) {
   return cleanedText.slice(0, maxLength - 3).trimEnd() + '...';
 }
 
+function normalizeWhatsAppRecipient(phone) {
+  if (typeof phone !== 'string') {
+    return '';
+  }
+
+  const cleanedPhone = phone.replace(/\D/g, '');
+
+  if (cleanedPhone.startsWith('549')) {
+    return `54${cleanedPhone.slice(3)}`;
+  }
+
+  return cleanedPhone;
+}
+
 module.exports = {
   isValidPhone,
   cleanText,
   truncateMessage,
+  normalizeWhatsAppRecipient,
 };

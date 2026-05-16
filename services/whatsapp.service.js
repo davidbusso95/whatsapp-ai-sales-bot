@@ -1,6 +1,6 @@
 const axios = require('axios');
 const logger = require('../utils/logger');
-const { truncateMessage } = require('../utils/validators');
+const { normalizeWhatsAppRecipient, truncateMessage } = require('../utils/validators');
 
 function getWhatsAppUrl() {
   const version = process.env.WHATSAPP_API_VERSION || 'v21.0';
@@ -18,14 +18,20 @@ function getHeaders() {
 async function sendTextMessage(to, message) {
   try {
     const url = getWhatsAppUrl();
+    const normalizedTo = normalizeWhatsAppRecipient(to);
     const payload = {
       messaging_product: 'whatsapp',
-      to,
+      to: normalizedTo,
       type: 'text',
       text: {
         body: truncateMessage(message, 4096),
       },
     };
+
+    console.log('WHATSAPP RECIPIENT NORMALIZED:', {
+      original: to,
+      normalized: normalizedTo,
+    });
 
     console.log('WHATSAPP SEND DEBUG:', {
       to,
