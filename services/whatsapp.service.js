@@ -17,7 +17,8 @@ function getHeaders() {
 
 async function sendTextMessage(to, message) {
   try {
-    const body = {
+    const url = getWhatsAppUrl();
+    const payload = {
       messaging_product: 'whatsapp',
       to,
       type: 'text',
@@ -26,7 +27,14 @@ async function sendTextMessage(to, message) {
       },
     };
 
-    const response = await axios.post(getWhatsAppUrl(), body, {
+    console.log('WHATSAPP SEND DEBUG:', {
+      to,
+      message,
+      url,
+      payload,
+    });
+
+    const response = await axios.post(url, payload, {
       headers: getHeaders(),
     });
 
@@ -38,6 +46,11 @@ async function sendTextMessage(to, message) {
     };
   } catch (error) {
     logger.error('Error sending WhatsApp text message', error);
+
+    if (error.response) {
+      console.log('WHATSAPP ERROR STATUS:', error.response.status);
+      console.log('WHATSAPP ERROR DATA:', JSON.stringify(error.response.data, null, 2));
+    }
 
     return {
       success: false,
