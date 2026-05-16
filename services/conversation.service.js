@@ -7,15 +7,22 @@ const { cleanText } = require('../utils/validators');
 const HUMAN_HANDOFF_MESSAGE =
   'Te derivo con una persona del equipo para que pueda ayudarte mejor.';
 
+function normalizeIntentText(text) {
+  return cleanText(text)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
 function detectGreeting(text) {
-  const normalizedText = cleanText(text).toLowerCase();
+  const normalizedText = normalizeIntentText(text);
   const greetingPhrases = ['hola', 'buenas', 'buen día', 'buenas tardes', 'buenas noches', 'buenos días'];
 
-  return greetingPhrases.some((phrase) => normalizedText.includes(phrase));
+  return greetingPhrases.some((phrase) => normalizedText.includes(normalizeIntentText(phrase)));
 }
 
 function detectProductsIntent(text) {
-  const normalizedText = cleanText(text).toLowerCase();
+  const normalizedText = normalizeIntentText(text);
   const productPhrases = [
     'productos',
     'menú',
@@ -28,11 +35,11 @@ function detectProductsIntent(text) {
     'tienen',
   ];
 
-  return productPhrases.some((phrase) => normalizedText.includes(phrase));
+  return productPhrases.some((phrase) => normalizedText.includes(normalizeIntentText(phrase)));
 }
 
 function detectHumanIntent(text) {
-  const normalizedText = cleanText(text).toLowerCase();
+  const normalizedText = normalizeIntentText(text);
   const humanPhrases = [
     'humano',
     'persona',
@@ -46,13 +53,15 @@ function detectHumanIntent(text) {
     'quiero hablar',
   ];
 
-  return humanPhrases.some((phrase) => normalizedText.includes(phrase));
+  return humanPhrases.some((phrase) => normalizedText.includes(normalizeIntentText(phrase)));
 }
 
 function detectOrderIntent(text) {
-  const normalizedText = cleanText(text).toLowerCase();
+  const normalizedText = normalizeIntentText(text);
   const orderPhrases = [
+    'pedido',
     'quiero pedir',
+    'comprar',
     'hago un pedido',
     'quiero comprar',
     'me llevas',
@@ -65,18 +74,19 @@ function detectOrderIntent(text) {
     'pago',
   ];
 
-  return orderPhrases.some((phrase) => normalizedText.includes(phrase));
+  return orderPhrases.some((phrase) => normalizedText.includes(normalizeIntentText(phrase)));
 }
 
 function formatProductsList(products) {
   if (!products || !products.length) {
-    return 'No hay productos disponibles en este momento.';
+    return 'En este momento no puedo consultar los productos. Te derivo con una persona del equipo.';
   }
 
   const productList = products
     .map((product) => {
-      const precio = product.precio ? ` $${product.precio}` : '';
-      return `- ${product.nombre}${precio}`;
+      const name = product.nombre || 'Producto';
+      const price = product.precio !== undefined && product.precio !== null ? `: $${product.precio}` : '';
+      return `- ${name}${price}`;
     })
     .join('\n');
 
@@ -84,25 +94,23 @@ function formatProductsList(products) {
 }
 
 function fallbackManualResponse({ userMessage, products }) {
-  const normalizedText = cleanText(userMessage).toLowerCase();
-
   // A) Detectar saludo
-  if (detectGreeting(normalizedText)) {
+  if (detectGreeting(userMessage)) {
     return 'Hola 👋 Gracias por escribirnos. Puedo ayudarte con productos, precios o tomar tu pedido. ¿Qué estás buscando?';
   }
 
   // B) Detectar intención de productos
-  if (detectProductsIntent(normalizedText)) {
+  if (detectProductsIntent(userMessage)) {
     return formatProductsList(products);
   }
 
   // C) Detectar intención de pedido
-  if (detectOrderIntent(normalizedText)) {
+  if (detectOrderIntent(userMessage)) {
     return 'Perfecto. Para tomar tu pedido necesito que me indiques: productos, nombre, dirección y método de pago.';
   }
 
   // D) Detectar intención de hablar con humano
-  if (detectHumanIntent(normalizedText)) {
+  if (detectHumanIntent(userMessage)) {
     return 'Te derivo con una persona del equipo para que pueda ayudarte mejor.';
   }
 
@@ -149,12 +157,6 @@ async function processIncomingMessage(incomingMessage) {
 
   const products = await airtableService.getAvailableProducts();
 
-  if (!products.length) {
-    await airtableService.markHumanRequired(phone);
-    await whatsappService.sendTextMessage(phone, airtableService.AIRTABLE_PRODUCTS_FALLBACK);
-    return;
-  }
-
   let answer;
   try {
     answer = await openaiService.generateAIResponse({
@@ -164,21 +166,26 @@ async function processIncomingMessage(incomingMessage) {
       businessDescription: process.env.BUSINESS_DESCRIPTION,
     });
 
-    // Si OpenAI retorna el mensaje genérico de error, usar fallback manual
-    if (answer === openaiService.OPENAI_FALLBACK) {
-      logger.info('OpenAI returned fallback message, using manual fallback response');
+    if (!isValidAIResponse(answer)) {
+      logger.warn('OpenAI failed, using manual fallback');
       answer = fallbackManualResponse({ userMessage: text, products });
       logger.info('Using manual fallback response');
     } else {
       logger.info('Using AI response');
     }
   } catch (error) {
-    logger.error('Error generating response, using manual fallback', error);
+    logger.error('OpenAI failed, using manual fallback', error);
     answer = fallbackManualResponse({ userMessage: text, products });
-    logger.info('Using manual fallback response due to error');
+    logger.info('Using manual fallback response');
   }
 
   await whatsappService.sendTextMessage(phone, answer);
+}
+
+function isValidAIResponse(answer) {
+  const cleanedAnswer = cleanText(answer);
+
+  return Boolean(cleanedAnswer) && cleanedAnswer !== openaiService.OPENAI_FALLBACK;
 }
 
 module.exports = {
@@ -187,4 +194,5 @@ module.exports = {
   detectOrderIntent,
   fallbackManualResponse,
   formatProductsList,
+  isValidAIResponse,
 };
