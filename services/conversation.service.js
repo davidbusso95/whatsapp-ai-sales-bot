@@ -130,15 +130,14 @@ async function processIncomingMessage(incomingMessage) {
 
   await whatsappService.markMessageAsRead(incomingMessage.messageId);
   await airtableService.upsertCustomer({ phone, name: profileName });
-  await airtableService.saveConversation({
-    phone,
-    message: text,
-    status: 'recibida',
-    requiresHuman: false,
-  });
 
   if (detectHumanIntent(text)) {
     await airtableService.markHumanRequired(phone);
+    await airtableService.saveConversation({
+      phone,
+      message: text,
+      responseBot: HUMAN_HANDOFF_MESSAGE,
+    });
     await whatsappService.sendTextMessage(phone, HUMAN_HANDOFF_MESSAGE);
     return;
   }
@@ -178,6 +177,12 @@ async function processIncomingMessage(incomingMessage) {
     answer = fallbackManualResponse({ userMessage: text, products });
     logger.info('Using manual fallback response');
   }
+
+  await airtableService.saveConversation({
+    phone,
+    message: text,
+    responseBot: answer,
+  });
 
   await whatsappService.sendTextMessage(phone, answer);
 }

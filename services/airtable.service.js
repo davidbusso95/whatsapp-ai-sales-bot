@@ -31,6 +31,13 @@ function getErrorPayload(error) {
   };
 }
 
+function logAirtableResponseError(error) {
+  if (error.response) {
+    console.log('AIRTABLE ERROR STATUS:', error.response.status);
+    console.log('AIRTABLE ERROR DATA:', JSON.stringify(error.response.data, null, 2));
+  }
+}
+
 async function findRecordByPhone(tableName, phone) {
   const formula = `{telefono} = '${String(phone).replace(/'/g, "\\'")}'`;
 
@@ -97,76 +104,97 @@ async function getAvailableProducts() {
   }
 }
 
-async function upsertCustomer({ phone, name }) {
+async function upsertCustomer({ phone, name, requiresHuman }) {
   try {
-    const tableName = getTableName('AIRTABLE_CUSTOMERS_TABLE', 'Clientes');
+    const tableName = 'Clientes';
     const now = new Date().toISOString();
     const existingCustomer = await findRecordByPhone(tableName, phone);
 
     if (existingCustomer) {
-      const response = await axios.patch(
-        `${getTableUrl(tableName)}/${existingCustomer.id}`,
-        {
+      const payload = {
           fields: {
             nombre: name || existingCustomer.fields?.nombre || '',
             ultima_interaccion: now,
+            requiere_humano:
+              requiresHuman === undefined
+                ? Boolean(existingCustomer.fields?.requiere_humano)
+                : Boolean(requiresHuman),
           },
-        },
+        };
+
+      console.log('UPSERT CUSTOMER:', payload);
+
+      const response = await axios.patch(
+        `${getTableUrl(tableName)}/${existingCustomer.id}`,
+        payload,
         { headers: getAirtableHeaders() }
       );
+
+      console.log('CUSTOMER SAVED');
 
       return response.data;
     }
 
+    const payload = {
+      fields: {
+        telefono: phone,
+        nombre: name || '',
+        ultima_interaccion: now,
+        requiere_humano: Boolean(requiresHuman),
+      },
+    };
+
+    console.log('UPSERT CUSTOMER:', payload);
+
     const response = await axios.post(
       getTableUrl(tableName),
-      {
-        fields: {
-          telefono: phone,
-          nombre: name || '',
-          ultima_interaccion: now,
-        },
-      },
+      payload,
       { headers: getAirtableHeaders() }
     );
+
+    console.log('CUSTOMER SAVED');
 
     return response.data;
   } catch (error) {
     logger.error('Error upserting customer in Airtable', getErrorPayload(error));
+    logAirtableResponseError(error);
     return null;
   }
 }
 
-async function saveConversation({ phone, message, status, requiresHuman }) {
+async function saveConversation({ phone, message, response: botResponse, responseBot }) {
   try {
-    const tableName = getTableName('AIRTABLE_CONVERSATIONS_TABLE', 'Conversaciones');
-
-    const response = await axios.post(
-      getTableUrl(tableName),
-      {
-        fields: {
-          telefono: phone,
-          ultimo_mensaje: message,
-          estado: status || 'activa',
-          requiere_humano: Boolean(requiresHuman),
-          fecha: new Date().toISOString(),
-        },
+    const tableName = 'Conversaciones';
+    const payload = {
+      fields: {
+        telefono: phone,
+        mensaje_usuario: message || '',
+        respuesta_bot: responseBot || botResponse || '',
+        timestamp: new Date().toISOString(),
       },
+    };
+
+    console.log('SAVE CONVERSATION:', payload);
+
+    const airtableResponse = await axios.post(
+      getTableUrl(tableName),
+      payload,
       { headers: getAirtableHeaders() }
     );
 
-    return response.data;
+    console.log('CONVERSATION SAVED');
+
+    return airtableResponse.data;
   } catch (error) {
     logger.error('Error saving conversation in Airtable', getErrorPayload(error));
+    logAirtableResponseError(error);
     return null;
   }
 }
 
 async function markHumanRequired(phone) {
-  return saveConversation({
+  return upsertCustomer({
     phone,
-    message: 'Cliente requiere atencion humana',
-    status: 'requiere_humano',
     requiresHuman: true,
   });
 }
