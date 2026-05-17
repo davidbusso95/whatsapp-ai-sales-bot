@@ -247,6 +247,12 @@ async function createOrder({
     return response.data;
   } catch (error) {
     logger.error('Error creating order in Airtable', getErrorPayload(error));
+
+    if (error.response) {
+      console.log('AIRTABLE ORDER ERROR STATUS:', error.response.status);
+      console.log('AIRTABLE ORDER ERROR DATA:', JSON.stringify(error.response.data, null, 2));
+    }
+
     return null;
   }
 }

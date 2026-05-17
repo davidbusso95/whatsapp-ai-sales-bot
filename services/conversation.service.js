@@ -115,7 +115,8 @@ function fallbackManualResponse({ userMessage, products }) {
 }
 
 async function processIncomingMessage(incomingMessage) {
-  const phone = incomingMessage.from;
+  const from = incomingMessage.from;
+  const phone = from;
   const text = cleanText(incomingMessage.text);
   const profileName = incomingMessage.profileName || '';
 
@@ -139,16 +140,24 @@ async function processIncomingMessage(incomingMessage) {
   }
 
   if (detectOrderIntent(text)) {
-    await airtableService.createOrder({
+    console.log('ORDER INTENT DETECTED', { phone: from, text });
+
+    const orderPayload = {
       telefono: phone,
-      cliente_nombre: profileName,
+      cliente_nombre: profileName || '',
       productos: text,
       direccion: '',
       metodo_pago: '',
       estado: 'Pendiente',
       total: 0,
       created_at: new Date().toISOString(),
-    });
+    };
+
+    console.log('CREATE ORDER PAYLOAD', orderPayload);
+
+    const result = await airtableService.createOrder(orderPayload);
+
+    console.log('ORDER SAVED', result);
 
     const orderResponse =
       'Perfecto 👌 Tomé tu pedido inicial. Para completarlo, indicame dirección de entrega y método de pago.';
