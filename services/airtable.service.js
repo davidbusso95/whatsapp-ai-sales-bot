@@ -200,6 +200,14 @@ async function markHumanRequired(phone) {
 }
 
 async function createOrder({
+  telefono,
+  cliente_nombre,
+  productos,
+  direccion,
+  metodo_pago,
+  estado,
+  total,
+  created_at,
   phone,
   customerName,
   orderDetail,
@@ -210,18 +218,27 @@ async function createOrder({
 }) {
   try {
     const tableName = getTableName('AIRTABLE_ORDERS_TABLE', 'Pedidos');
+    const orderPhone = telefono || phone;
+    const customer = cliente_nombre || customerName || '';
+    const orderProducts = productos || orderDetail || '';
+    const orderAddress = direccion || address || '';
+    const payment = metodo_pago || paymentMethod || '';
+    const orderStatus = estado || status || 'Pendiente';
+    const orderTotal = total === undefined || total === null ? estimatedTotal || 0 : total;
+    const createdAt = created_at || new Date().toISOString();
 
     const response = await axios.post(
       getTableUrl(tableName),
       {
         fields: {
-          telefono: phone,
-          nombre_cliente: customerName || '',
-          detalle_pedido: orderDetail || '',
-          total_estimado: estimatedTotal || 0,
-          direccion: address || '',
-          metodo_pago: paymentMethod || '',
-          estado: status || 'pendiente_datos',
+          telefono: orderPhone,
+          cliente_nombre: customer,
+          productos: orderProducts,
+          direccion: orderAddress,
+          metodo_pago: payment,
+          estado: orderStatus,
+          total: orderTotal,
+          created_at: createdAt,
         },
       },
       { headers: getAirtableHeaders() }

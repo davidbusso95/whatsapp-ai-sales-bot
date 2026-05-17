@@ -62,16 +62,12 @@ function detectOrderIntent(text) {
     'pedido',
     'quiero pedir',
     'comprar',
-    'hago un pedido',
-    'quiero comprar',
-    'me llevas',
-    'me llevás',
     'delivery',
     'envio',
     'envío',
-    'direccion',
-    'dirección',
-    'pago',
+    'quiero una',
+    'quiero un',
+    'quiero',
   ];
 
   return orderPhrases.some((phrase) => normalizedText.includes(normalizeIntentText(phrase)));
@@ -104,14 +100,14 @@ function fallbackManualResponse({ userMessage, products }) {
     return formatProductsList(products);
   }
 
-  // C) Detectar intención de pedido
-  if (detectOrderIntent(userMessage)) {
-    return 'Perfecto. Para tomar tu pedido necesito que me indiques: productos, nombre, dirección y método de pago.';
-  }
-
-  // D) Detectar intención de hablar con humano
+  // C) Detectar intención de hablar con humano
   if (detectHumanIntent(userMessage)) {
     return 'Te derivo con una persona del equipo para que pueda ayudarte mejor.';
+  }
+
+  // D) Detectar intención de pedido
+  if (detectOrderIntent(userMessage)) {
+    return 'Perfecto 👌 Tomé tu pedido inicial. Para completarlo, indicame dirección de entrega y método de pago.';
   }
 
   // E) Respuesta por defecto
@@ -144,14 +140,27 @@ async function processIncomingMessage(incomingMessage) {
 
   if (detectOrderIntent(text)) {
     await airtableService.createOrder({
-      phone,
-      customerName: profileName,
-      orderDetail: text,
-      estimatedTotal: 0,
-      address: '',
-      paymentMethod: '',
-      status: 'pendiente_datos',
+      telefono: phone,
+      cliente_nombre: profileName,
+      productos: text,
+      direccion: '',
+      metodo_pago: '',
+      estado: 'Pendiente',
+      total: 0,
+      created_at: new Date().toISOString(),
     });
+
+    const orderResponse =
+      'Perfecto 👌 Tomé tu pedido inicial. Para completarlo, indicame dirección de entrega y método de pago.';
+
+    await airtableService.saveConversation({
+      phone,
+      message: text,
+      responseBot: orderResponse,
+    });
+
+    await whatsappService.sendTextMessage(phone, orderResponse);
+    return;
   }
 
   const products = await airtableService.getAvailableProducts();
