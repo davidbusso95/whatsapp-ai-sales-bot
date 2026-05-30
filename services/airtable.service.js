@@ -52,6 +52,10 @@ async function findRecordByPhone(tableName, phone) {
   return response.data?.records?.[0] || null;
 }
 
+function escapeAirtableFormulaValue(value) {
+  return String(value || '').replace(/'/g, "\\'");
+}
+
 async function getAvailableProducts() {
   try {
     const tableName = getTableName('AIRTABLE_PRODUCTS_TABLE', 'Productos');
@@ -257,11 +261,53 @@ async function createOrder({
   }
 }
 
+async function findPendingOrderByPhone(phone) {
+  try {
+    const tableName = getTableName('AIRTABLE_ORDERS_TABLE', 'Pedidos');
+    const formula = `AND({telefono} = '${escapeAirtableFormulaValue(phone)}', {estado} = 'Pendiente')`;
+
+    const response = await axios.get(getTableUrl(tableName), {
+      headers: getAirtableHeaders(),
+      params: {
+        maxRecords: 1,
+        filterByFormula: formula,
+        'sort[0][field]': 'created_at',
+        'sort[0][direction]': 'desc',
+      },
+    });
+
+    return response.data?.records?.[0] || null;
+  } catch (error) {
+    logger.error('Error finding pending order in Airtable', getErrorPayload(error));
+    logAirtableResponseError(error);
+    return null;
+  }
+}
+
+async function updateOrder(orderId, fields) {
+  try {
+    const tableName = getTableName('AIRTABLE_ORDERS_TABLE', 'Pedidos');
+    const response = await axios.patch(
+      `${getTableUrl(tableName)}/${orderId}`,
+      { fields },
+      { headers: getAirtableHeaders() }
+    );
+
+    return response.data;
+  } catch (error) {
+    logger.error('Error updating order in Airtable', getErrorPayload(error));
+    logAirtableResponseError(error);
+    return null;
+  }
+}
+
 module.exports = {
   getAvailableProducts,
   upsertCustomer,
   saveConversation,
   markHumanRequired,
   createOrder,
+  findPendingOrderByPhone,
+  updateOrder,
   AIRTABLE_PRODUCTS_FALLBACK,
 };

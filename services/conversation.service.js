@@ -89,6 +89,122 @@ function formatProductsList(products) {
   return `Estos son algunos productos disponibles:\n${productList}\n¿Querés que te ayude a armar un pedido?`;
 }
 
+function extractOrderCompletionData(text, profileName = '') {
+  const nameMatch = text.match(/mi nombre es\s+(.+?)(?=,|\s+la direcci[oó]n\b|\s+direccion\b|\s+y\s+pago\b|\s+pago\b|$)/i);
+  const addressMatch = text.match(/(?:la\s+)?direcci[oó]n\s+es\s+(.+?)(?=\s+y\s+pago\b|\s+pago\b|,|$)/i);
+  const normalizedText = normalizeIntentText(text);
+
+  let metodoPago = '';
+
+  if (normalizedText.includes('mercado pago')) {
+    metodoPago = 'Mercado Pago';
+  } else if (normalizedText.includes('transferencia')) {
+    metodoPago = 'Transferencia';
+  } else if (normalizedText.includes('efectivo')) {
+    metodoPago = 'Efectivo';
+  } else if (normalizedText.includes('tarjeta')) {
+    metodoPago = 'Tarjeta';
+  }
+
+  return {
+    nombre: nameMatch?.[1]?.trim() || profileName || '',
+    direccion: addressMatch?.[1]?.trim() || '',
+    metodo_pago: metodoPago,
+  };
+}
+
+function hasOrderCompletionSignal(text) {
+  const normalizedText = normalizeIntentText(text);
+
+  return (
+    normalizedText.includes('mi nombre es') ||
+    normalizedText.includes('direccion es') ||
+    normalizedText.includes('la direccion es') ||
+    normalizedText.includes('efectivo') ||
+    normalizedText.includes('transferencia') ||
+    normalizedText.includes('mercado pago') ||
+    normalizedText.includes('tarjeta')
+  );
+}
+
+function normalizeProductText(text) {
+  return normalizeIntentText(text)
+    .replace(/\b\d+([.,]\d+)?\s*(ml|l|lt|lts|g|gr|kg|cc)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function productMatchesOrder(productName, orderText) {
+  const normalizedOrder = normalizeProductText(orderText);
+  const normalizedProduct = normalizeProductText(productName);
+
+  if (!normalizedProduct) {
+    return false;
+  }
+
+  if (normalizedOrder.includes(normalizedProduct)) {
+    return true;
+  }
+
+  const productTokens = normalizedProduct
+    .split(' ')
+    .filter((token) => token.length > 2);
+
+  return productTokens.length > 0 && productTokens.every((token) => normalizedOrder.includes(token));
+}
+
+function calculateOrderTotal(orderText, products) {
+  if (!orderText || !products?.length) {
+    return {
+      total: 0,
+      matchedProducts: [],
+    };
+  }
+
+  const matchedProducts = products.filter((product) => productMatchesOrder(product.nombre, orderText));
+  const total = matchedProducts.reduce((sum, product) => sum + Number(product.precio || 0), 0);
+
+  return {
+    total,
+    matchedProducts,
+  };
+}
+
+function formatProductNames(products, fallbackText) {
+  const productNames = products
+    .map((product) => product.nombre)
+    .filter(Boolean);
+
+  if (!productNames.length) {
+    return fallbackText || 'Pedido inicial';
+  }
+
+  if (productNames.length === 1) {
+    return productNames[0];
+  }
+
+  return `${productNames.slice(0, -1).join(', ')} y ${productNames[productNames.length - 1]}`;
+}
+
+function formatConfirmedOrderResponse({ nombre, pedido, direccion, metodoPago, total }) {
+  return `Perfecto ${nombre} ✅
+
+Tu pedido quedó confirmado:
+
+Pedido:
+${pedido}
+
+Dirección:
+${direccion}
+
+Método de pago:
+${metodoPago}
+
+Total estimado: $${total}
+
+Ya avisamos al equipo para prepararlo.`;
+}
+
 function fallbackManualResponse({ userMessage, products }) {
   // A) Detectar saludo
   if (detectGreeting(userMessage)) {
@@ -136,6 +252,60 @@ async function processIncomingMessage(incomingMessage) {
       responseBot: HUMAN_HANDOFF_MESSAGE,
     });
     await whatsappService.sendTextMessage(phone, HUMAN_HANDOFF_MESSAGE);
+    return;
+  }
+
+  const pendingOrder = await airtableService.findPendingOrderByPhone(phone);
+
+  if (pendingOrder) {
+    console.log('PENDING ORDER FOUND', pendingOrder.id);
+
+    const completionData = extractOrderCompletionData(text, profileName);
+
+    console.log('ORDER COMPLETION DATA', completionData);
+
+    if (!hasOrderCompletionSignal(text) || !completionData.direccion || !completionData.metodo_pago) {
+      const missingDataResponse =
+        'Para completar tu pedido necesito dirección de entrega y método de pago.';
+
+      await airtableService.saveConversation({
+        phone,
+        message: text,
+        responseBot: missingDataResponse,
+      });
+
+      await whatsappService.sendTextMessage(phone, missingDataResponse);
+      return;
+    }
+
+    const products = await airtableService.getAvailableProducts();
+    const pendingOrderText = pendingOrder.fields?.productos || '';
+    const { total, matchedProducts } = calculateOrderTotal(pendingOrderText, products);
+    const updatedOrder = await airtableService.updateOrder(pendingOrder.id, {
+      cliente_nombre: completionData.nombre || profileName || '',
+      direccion: completionData.direccion,
+      metodo_pago: completionData.metodo_pago,
+      estado: 'Confirmado',
+      total,
+    });
+
+    console.log('ORDER UPDATED', updatedOrder);
+
+    const finalResponse = formatConfirmedOrderResponse({
+      nombre: completionData.nombre || profileName || '',
+      pedido: formatProductNames(matchedProducts, pendingOrderText),
+      direccion: completionData.direccion,
+      metodoPago: completionData.metodo_pago,
+      total,
+    });
+
+    await airtableService.saveConversation({
+      phone,
+      message: text,
+      responseBot: finalResponse,
+    });
+
+    await whatsappService.sendTextMessage(phone, finalResponse);
     return;
   }
 
